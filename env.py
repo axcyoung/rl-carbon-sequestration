@@ -1,11 +1,8 @@
 import gym
 from gym import spaces
 import tensorflow as tf
-import stable_baselines
+# import stable_baselines
 import numpy as np
-
-
-
 import itertools
 import tensorflow.contrib.layers as layers
 import baselines.common.tf_util as U
@@ -14,6 +11,16 @@ from baselines import deepq
 from baselines.deepq.replay_buffer import ReplayBuffer
 from baselines.deepq.utils import ObservationInput
 from baselines.common.schedules import LinearSchedule
+
+
+import warnings
+warnings.filterwarnings("ignore", message=r"Passing", category=FutureWarning)
+warnings.filterwarnings("ignore", message=r"WARNING", category=FutureWarning)
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR) # surpress warning
+# tf.get_logger().setLevel('ERROR')
+
 
 
 def q_learning_discrete():
@@ -81,7 +88,7 @@ class BasicEnv(gym.Env):
     self.action_space = spaces.Box(np.array([0.]), np.array([1.]), dtype=np.float32) # porportion of old trees to cut down
     # Box(low=np.array([-1.0, -2.0]), high=np.array([2.0, 4.0]), dtype=np.float32) # [-1,2] for first dimension and [-2,4] for second dimension 
 
-    # youngtree_count, oldtree_count, tree_carbon, soil_carbon, product_carbon (tree species, size/age classes)
+   
     low = np.array([0., 0., 0., 0., 0.], dtype=np.float32)
     high = np.array([float('inf'), float('inf'), float('inf'), float('inf'), float('inf')], dtype=np.float32)
     self.observation_space = spaces.Box(low, high, dtype=np.float32) # TODO
@@ -89,23 +96,22 @@ class BasicEnv(gym.Env):
 
   def reset(self):
     """Returns state value in self.observation_space. Re-start the environment. """
-    self.state = [656., 76., 150., 0., 0]
-    return np.array(self.state, dtype=np.float32)
+    self.state = [328, 328, 76, 150, 0] # youngtree_count, oldtree_count, tree_carbon, soil_carbon, product_carbon (tree species, size/age classes)
+    return np.array(self.state, dtype=np.float32) 
 
   def step(self, action):
     """argument action is within action_space (integer or numpy array) """
-    err_msg = f"{action!r} ({type(action)}) invalid"
-    assert self.action_space.contains(action), err_msg
+    # assert self.action_space.contains(action), f"{action!r} ({type(action)}) invalid"
     assert self.state is not None, "Call reset before using step method."
 
     youngtree_count, oldtree_count, tree_carbon, soil_carbon, product_carbon = self.state
     original_total_carbon = tree_carbon + soil_carbon + product_carbon
 
     #insert differential equations here
-
+    
     self.state = [youngtree_count, oldtree_count, tree_carbon, soil_carbon, product_carbon]
 
-    done = bool(youngtree_count + oldtree_count != 0.0) #simulation over?
+    done = bool(youngtree_count + oldtree_count == 0.0) #simulation over?
     carbon_sequestered = tree_carbon + soil_carbon + product_carbon - original_total_carbon
     reward = 1.0 * carbon_sequestered #can have different reward function
     
@@ -125,15 +131,16 @@ def dqn():
     # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
     with U.make_session(num_cpu=8):
         env = BasicEnv() # Create the environment
+        # state_space_size = env.observation_space.shape # (5,)
         # env = gym.make("CartPole-v0")
         # Create all the functions necessary to train the model
         act, train, update_target, debug = deepq.build_train(
             make_obs_ph=lambda name: ObservationInput(env.observation_space, name=name), # input placeholder for specific observation space
             q_func=model,
-            num_actions=env.action_space.n,
+            num_actions=env.action_space.shape[0],  # (1,)
             optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
         )
-        replay_buffer = ReplayBuffer(50000) # Create the replay buffer
+        replay_buffer = ReplayBuffer(50000) # Create the replay buffer, Max number of transitions to store in the buffer
         # Schedule for exploration: 1 (every action is random) -> 0.02 (98% of actions selected by values predicted by model)
         exploration = LinearSchedule(schedule_timesteps=10000, initial_p=1.0, final_p=0.02)
 
@@ -141,42 +148,48 @@ def dqn():
         U.initialize()
         update_target()
 
-        episode_rewards = [0.0]
-        state = env.reset()
-        for t in itertools.count():
+        episode_rewards = []
+        stepct = 0
+        for episode in range(num_episodes):
+            episode_rewards.append(0)  # each ele = reward from one episode
+            state = env.reset()
+            done = False
+            
+            for step in range(steps_per_episode):
+                stepct+=1
+            # for t in itertools.count():
             # Take action and update exploration to the newest value
-            action = act(state[None], stochastic=False, update_eps=exploration.value(t))[0] # observation object, stochastic boolean, update
-            new_state, rew, done, info = env.step(action)
-
-            # Store transition in the replay buffer.
-            replay_buffer.add(obs, action, rew, new_state, float(done))
-            obs = new_state
-
-            episode_rewards[-1] += rew
-            if done:
-                obs = env.reset()
-                episode_rewards.append(0)
-
-            # is_solved = t > 100 and np.mean(episode_rewards[-101:-1]) >= 200
-            if done: # is_solved
-                env.render()
-            else: # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
-                if t > 1000:
-                    obses_t, actions, rewards, obses_tp1, dones = replay_buffer.sample(32)
+                action = act(state[None], stochastic=False, update_eps=exploration.value(stepct))[0] # observation object, stochastic boolean, update
+                new_state, rew, done, info = env.step(action)
+                print(f"Episode-step {episode}-{step}: new_state={new_state}, rew={rew}, done={done}")
+                # Store transition in the replay buffer.
+                replay_buffer.add(state, action, rew, new_state, float(done))
+                state = new_state
+                episode_rewards[-1] += rew
+                if done:  break # go to next episode
+                if episode > -1: # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
+                    obses_t, actions, rewards, obses_tp1, dones = replay_buffer.sample(32) # Sample a batch of experiences
                     train(obses_t, actions, rewards, obses_tp1, dones, np.ones_like(rewards))
-                # Update target network periodically.
-                if t % 1000 == 0:
-                    update_target()
 
-            if done and len(episode_rewards) % 10 == 0:
-                logger.record_tabular("steps", t)
-                logger.record_tabular("episodes", len(episode_rewards))
-                logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
-                logger.record_tabular("% time spent exploring", int(100 * exploration.value(t)))
-                logger.dump_tabular()
+            update_target() # Update target network periodically.
+            # end of an episode
+            logger.record_tabular("steps", stepct)
+            logger.record_tabular("episodes", len(episode_rewards))
+            logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
+            logger.record_tabular("% time spent exploring", int(100 * exploration.value(stepct)))
+            logger.dump_tabular()
 
 
 if __name__ == '__main__':
+    num_episodes = 3 # update once per episode
+    steps_per_episode = 10
+    # learning_rate = 0.1
+    # discount_rate = 0.99
+    # exploration_rate = 1
+    # max_exploration_rate = 1
+    # min_exploration_rate = 0.01
+    # exploration_decay_rate = 0.01 #if we decrease it, will learn slower
+    # rewards_all_episodes = []
     dqn()
 
 
