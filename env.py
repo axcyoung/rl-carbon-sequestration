@@ -242,11 +242,11 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
             for step in range(steps_per_episode): # each step = 1 year, each episode = steps_per_episode years
                 if episode == max_episode_num-1:
                     soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = env.state 
-                    soil_carbons.append(soil_carbon)
-                    tree_carbons.append(tree_carbon)
-                    product_carbons.append(product_carbon)
-                    oldtree_cts.append(oldtree_ct)
-                    youngtree_cts.append(youngtree_ct)
+                    soil_carbons.append(soil_carbon.item())
+                    tree_carbons.append(tree_carbon.item())
+                    product_carbons.append(product_carbon.item())
+                    oldtree_cts.append(oldtree_ct.item())
+                    youngtree_cts.append(youngtree_ct.item())
                 total_stepct+=1
                 exploration = max(exploration + exploration_change, exploration_end)
 
@@ -281,11 +281,11 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
             print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={env.total_carbon()}\n")
 
         endtime = time.time()
-        with open(f"output/{endtime}_last_episode_vals.json", 'w') as f:
-            f.write(json.dumps({"soil_carbons":str(soil_carbons), "tree_carbons":str(tree_carbons), "product_carbons":str(product_carbons), 
-                "oldtree_cts":str(oldtree_cts), "youngtree_cts":str(youngtree_cts)}, indent=4))
+        with open(f"output/{endtime}_last_episode_vals.json", 'w') as f:      
+            f.write(json.dumps({"soil_carbons":soil_carbons, "tree_carbons":tree_carbons, "product_carbons":product_carbons, 
+                "oldtree_cts":oldtree_cts, "youngtree_cts":youngtree_cts}, indent=4))
         episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
-        # act.save(f"output/{endtime}_act.pkl")
+        act.save(f"output/{endtime}_act.pkl")
         return endtime, actions_taken, episode_rewards, env.state
 
 def plot():
@@ -358,7 +358,7 @@ if __name__ == '__main__':
     }
     # eco_run(parameters, undisturbed_iter=2000)
     # dqn1(parameters, max_step_ct = 1000)
-    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 100, steps_per_episode=100)
+    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 1, steps_per_episode=100)
     print("\n------------------------ %s seconds ------------------------" % (endtime - start_time)) # round(time.time() - start_time, 2)
     print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
     print(f"episode_rewards={episode_rewards}")
