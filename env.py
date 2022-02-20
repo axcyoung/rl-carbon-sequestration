@@ -3,7 +3,11 @@ from gym import spaces
 import tensorflow as tf
 # import stable_baselines
 import numpy as np
+import os
 import itertools
+import json
+import time
+import matplotlib.pyplot as plt
 import tensorflow.contrib.layers as layers
 import baselines.common.tf_util as U
 from baselines import logger
@@ -12,8 +16,8 @@ from baselines.deepq.replay_buffer import ReplayBuffer
 from baselines.deepq.utils import ObservationInput
 from baselines.common.schedules import LinearSchedule
 
-import json
-import time
+
+
 
 # import warnings
 # warnings.filterwarnings("ignore", message=r"Passing", category=FutureWarning)
@@ -189,7 +193,7 @@ def eco_run(parameters, undisturbed_iter=1000, delta = 0.01):
         env.eco_step(undisturbed_iter, delta)
 
 
-def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
+def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
     """main difference in how things are looped. This one has max_episode_num and steps_per_episode.
         returns 'act': ActWrapper
         Wrapper over act function. Adds ability to save it and load it.
@@ -198,14 +202,13 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
     # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
     with U.make_session(num_cpu=32):
         env = FCEnv(**parameters) # Create the environment
-        return
         # Create all the functions necessary to train the model
         act, train, update_target, debug = deepq.build_train(
             make_obs_ph=lambda name: ObservationInput(env.observation_space, name=name), # input placeholder for specific observation space
             q_func=model,
             num_actions=env.action_space.n,  # (1,)
             optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
-            gamma = 0.5 # relatively long-term
+            gamma = dqnparams["gamma"] # relatively long-term
         )
         act_params = {
             'make_obs_ph': lambda name: ObservationInput(env.observation_space, name=name),
@@ -217,9 +220,9 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
         replay_buffer = ReplayBuffer(50000) # Create the replay buffer, Max number of transitions to store in the buffer
         # Schedule for exploration: 1 (every action is random) -> 0.02 (98% of actions selected by values predicted by model)
         # exploration = LinearSchedule(schedule_timesteps=5000, initial_p=1, final_p=1)
-        exploration_start = 0
-        exploration_end = 0
-        exploration_timestep = 2000
+        exploration_start = dqnparams["exploration_start"]
+        exploration_end = dqnparams["exploration_end"]
+        exploration_timestep = dqnparams["exploration_timestep"]
         exploration_change = (exploration_end-exploration_start)/exploration_timestep
         
 
@@ -278,13 +281,55 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
             print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={env.total_carbon()}\n")
 
         endtime = time.time()
-        print(soil_carbons)
         with open(f"output/{endtime}_last_episode_vals.json", 'w') as f:
             f.write(json.dumps({"soil_carbons":str(soil_carbons), "tree_carbons":str(tree_carbons), "product_carbons":str(product_carbons), 
                 "oldtree_cts":str(oldtree_cts), "youngtree_cts":str(youngtree_cts)}, indent=4))
         episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
         # act.save(f"output/{endtime}_act.pkl")
         return endtime, actions_taken, episode_rewards, env.state
+
+def plot():
+    directory = "output"
+    x = list(range(100))
+
+    for f in os.listdir(directory):
+        if not f.endswith("json"):
+            continue
+        print("\n", f)
+        data = json.load(open(os.path.join(directory, f)))
+        print(len(data["oldtree_cts"]))
+        print(data["oldtree_cts"])
+        plt.plot(data["oldtree_cts"], label="oldtree_cts")
+        plt.legend()
+        plt.title(f[:-23]) # timestamp
+        plt.savefig(os.path.join(directory, f"{f[:-5]}.jpg"))
+        return
+   
+    # fig, axs = plt.subplots(ncols=2, nrows=2, sharex='all', sharey='all', figsize=(16,6))  # Share both X and Y axes with all subplots
+    # axs[0, 0].plot(x, y)
+    # axs[1, 1].scatter(x, y)
+    # fig = plt.figure(figsize=(16,6))
+    # ax0 = fig.add_subplot(121)
+    # ax0.plot(*args0)
+    # ax1 = fig.add_subplot(122)
+    # ax1.plot(*args1)
+    # plt.tight_layout()
+    # plt.savefig('plots.png')
+
+    # plt.plot(data["soil_carbons"], label="soil_carbons")
+    # plt.plot(data["tree_carbons"], label="tree_carbons")
+    # plt.plot(data["product_carbons"], label="product_carbons")
+    # plt.plot(x, data["oldtree_cts"], label="oldtree_cts")
+    # plt.plot(x, data["youngtree_cts"], label="youngtree_cts")
+    # plt.legend()
+    # plt.title(f[:-23]) # timestamp
+    # plt.savefig(os.path.join(directory, f"{f[:-5]}.jpg"))
+
+def param_search():
+    # x = np.linspace(0, 1, nx)
+    # y = np.linspace(0, 1, ny)
+    # xv, yv = np.meshgrid(x, y)
+    return
 
 
 if __name__ == '__main__':
@@ -305,10 +350,15 @@ if __name__ == '__main__':
         "death_o": 0.05, 
         "death_y": 0.25
     }
-
+    dqnparams = {
+        "gamma": 0.5, # discount factor
+        "exploration_start": 0,
+        "exploration_end": 0,
+        "exploration_timestep": 2000
+    }
     # eco_run(parameters, undisturbed_iter=2000)
     # dqn1(parameters, max_step_ct = 1000)
-    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, max_episode_num = 100, steps_per_episode=100)
+    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 100, steps_per_episode=100)
     print("\n------------------------ %s seconds ------------------------" % (endtime - start_time)) # round(time.time() - start_time, 2)
     print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
     print(f"episode_rewards={episode_rewards}")
@@ -335,61 +385,3 @@ if __name__ == '__main__':
     # td_error = Q(s,a) - (r + gamma * max_a' Q(s', a'))
     # loss = huber_loss[td_error]
 # https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/deepq/build_graph.py#L317
-
-
-# def dqn1(parameters, max_step_ct=100):
-#     # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
-#     with U.make_session(num_cpu=32):
-#         env = FCEnv(**parameters) # Create the environment
-#         # Create all the functions necessary to train the model
-#         act, train, update_target, debug = deepq.build_train(
-#             make_obs_ph=lambda name: ObservationInput(env.observation_space, name=name), # input placeholder for specific observation space
-#             q_func=model,
-#             num_actions=env.action_space.n,  # (1,)
-#             optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
-#             gamma = 0.99# relatively long-term
-#         )
-#         replay_buffer = ReplayBuffer(50000) # Create the replay buffer, Max number of transitions to store in the buffer
-#         # Schedule for exploration: 1 (every action is random) -> 0.02 (98% of actions selected by values predicted by model)
-#         exploration = LinearSchedule(schedule_timesteps=10000, initial_p=0.5, final_p=0.02)
-
-#         # Initialize the parameters and copy them to the target network.
-#         U.initialize()
-#         update_target()
-
-#         episode_rewards = [0.0] # each ele = reward from one complete run until done
-#         state = env.reset()  # returns state
-#         for stepct in itertools.count():
-#             if stepct>=max_step_ct:
-#                 return
-#             env.eco_step(99)
-#             if stepct % 25 == 0: print(f"[{stepct}] preaction: state={env.state}")
-#             # Pick action and update exploration to the newest value
-#             action = act(state[None], stochastic=False, update_eps=exploration.value(stepct))[0] # observation obj (axis added), stochastic boolean, update
-#             new_state, rew, done, info = env.step(action)
-#             if stepct % 25 == 0: print(f"\tpostaction: state={env.state}")
-#             # Store transition in the replay buffer.
-#             replay_buffer.add(state, action, rew, new_state, float(done))
-#             state = new_state
-#             episode_rewards[-1] += rew
-#             if done:        
-#                 state = env.reset()
-#                 episode_rewards.append(0)
-#             is_solved = stepct > 100 and np.mean(episode_rewards[-101:-1]) >= 200
-#             if is_solved:
-#                 print("------------SOLVED------------")
-#                 # env.render()
-#             else: 
-#                 if stepct > -1: # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
-#                     obses_t, actions, rewards, obses_tp1, dones = replay_buffer.sample(32) # Sample a batch of experiences
-#                     train(obses_t, actions, rewards, obses_tp1, dones, np.ones_like(rewards))
-#                 if stepct % 100 == 0:
-#                     update_target() # Update target network periodically.
-
-#             # if done and len(episode_rewards) % 1 == 0: # every nth done reached
-#             if stepct % 100 == 0: # every nth done reached
-#                 logger.record_tabular("steps", stepct)
-#                 logger.record_tabular("episodes", len(episode_rewards))
-#                 logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
-#                 logger.record_tabular("% time spent exploring", int(100 * exploration.value(stepct)))
-#                 logger.dump_tabular()

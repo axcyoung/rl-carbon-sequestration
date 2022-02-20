@@ -6,6 +6,7 @@ pip install gym
 git clone https://github.com/openai/baselines.git
 cd baselines/
 pip install -e .
+conda install matplotlib
 
 
 python env.py
