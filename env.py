@@ -165,7 +165,6 @@ class FCEnv(gym.Env):  # the forest carbon env
             g = 0.1* youngtree_ct + 0.2*oldtree_ct # reproduction of trees
             print(f"eco_step: self.state={self.state}, f={f}, g={g},")
             self.state += np.matmul(self.eco_step_matrix, self.state) + np.array([0, f, 0, 0, g])  # 2d and 1d  # (5,)
-            print(f"eco_step: self.state={self.state}")
 
     
 
@@ -198,52 +197,52 @@ def dqn(parameters, undisturbed = False):
         # Initialize the parameters and copy them to the target network.
         U.initialize()
         update_target()
-        episode_rewards = []
-        stepct = 0
-        for episode in range(num_episodes):
-            episode_rewards.append(0)  # each ele = reward from one episode
-            state = env.reset()  # returns state
-            done = False
-            
-            for step in range(steps_per_episode):
-                stepct+=1
-                if undisturbed:
-                    env.eco_step(10)
-                    print(f"Episode-step {episode}-{step}: env.state={env.state}")
-                    continue # to next step directly
-                env.eco_step(99)
-                # Pick action and update exploration to the newest value
-                action = act(state[None], stochastic=False, update_eps=exploration.value(stepct))[0] # observation obj (axis added), stochastic boolean, update
-                new_state, rew, done, info = env.step(action)
-                print(f"Episode-step {episode}-{step}: new_state={new_state}")
-                # Store transition in the replay buffer.
-                replay_buffer.add(state, action, rew, new_state, float(done))
-                state = new_state
-                episode_rewards[-1] += rew
-                if done:  break # go to next episode
-                if episode > -1: # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
+
+        episode_rewards = [0.0] # each ele = reward from one complete run until done
+        state = env.reset()  # returns state
+        done = False
+        undisturbedIter=1
+        for stepct in itertools.count():
+            if undisturbed:
+                if stepct >= undisturbedIter:
+                    print("------------DONE------------")
+                    return
+                env.eco_step(100)
+                continue # to next step directly
+
+            env.eco_step(99)
+            # Pick action and update exploration to the newest value
+            action = act(state[None], stochastic=False, update_eps=exploration.value(stepct))[0] # observation obj (axis added), stochastic boolean, update
+            new_state, rew, done, info = env.step(action)
+            print(f"{stepct}: new_state={new_state}")
+            # Store transition in the replay buffer.
+            replay_buffer.add(state, action, rew, new_state, float(done))
+            state = new_state
+            episode_rewards[-1] += rew
+            if done: # STILL        
+                state = env.reset()
+                episode_rewards.append(0)
+            is_solved = stepct > 100 and np.mean(episode_rewards[-101:-1]) >= 200
+            if is_solved:
+                # Show off the result
+                print("------------SOLVED------------")
+                # env.render()
+            else: 
+                if stepct > -1: # Minimize the error in Bellman's equation on a batch sampled from replay buffer.
                     obses_t, actions, rewards, obses_tp1, dones = replay_buffer.sample(32) # Sample a batch of experiences
                     train(obses_t, actions, rewards, obses_tp1, dones, np.ones_like(rewards))
+                if stepct % 100 == 0:
+                    update_target() # Update target network periodically.
 
-            # end of an episode
-            update_target() # Update target network periodically.
-            logger.record_tabular("steps", stepct)
-            logger.record_tabular("episodes", len(episode_rewards))
-            logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
-            logger.record_tabular("% time spent exploring", int(100 * exploration.value(stepct)))
-            logger.dump_tabular()
+            if done and len(episode_rewards) % 1 == 0: # every nth done reached
+                logger.record_tabular("steps", stepct)
+                logger.record_tabular("episodes", len(episode_rewards))
+                logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
+                logger.record_tabular("% time spent exploring", int(100 * exploration.value(stepct)))
+                logger.dump_tabular()
 
 
 if __name__ == '__main__':
-    num_episodes = 1 # update once per episode
-    steps_per_episode = 1
-    # learning_rate = 0.1
-    # discount_rate = 0.99
-    # exploration_rate = 1
-    # max_exploration_rate = 1
-    # min_exploration_rate = 0.01
-    # exploration_decay_rate = 0.01 #if we decrease it, will learn slower
-    # rewards_all_episodes = []
     parameters = {
         "K_T": 0.019, # tree litterfall rate
         "K_S": 1/6.2, # soil decay
