@@ -154,7 +154,7 @@ def model(inpt, num_actions, scope, reuse=False):
         out = layers.fully_connected(out, num_outputs=num_actions, activation_fn=None)
         return out
 
-def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
+def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100, save_frequency = 100):
     """main difference in how things are looped. This one has max_episode_num and steps_per_episode.
         returns 'act': ActWrapper
         Wrapper over act function. Adds ability to save it and load it.
@@ -195,13 +195,13 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
         total_stepct = 0
         episode_rewards = [] # each ele = reward from one complete run until done
         actions_taken = []
-
-        data = {"soil_carbons":[], "tree_carbons":[], "product_carbons":[], "oldtree_cts":[], "youngtree_cts":[]}
+        data = {"parameters": str(parameters), "dqnparams": str(dqnparams),
+            "soil_carbons":[], "tree_carbons":[], "product_carbons":[], "oldtree_cts":[], "youngtree_cts":[]}
         for episode in range(max_episode_num): # each episode: restart run, keep learning on old weights
             state = env.reset()  # returns state
             episode_rewards.append(0)
             for step in range(steps_per_episode): # each step = 1 year, each episode = steps_per_episode years
-                if episode == max_episode_num-1:
+                if episode==max_episode_num-1:
                     soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = env.state 
                     data["soil_carbons"].append(soil_carbon.item())
                     data["tree_carbons"].append(tree_carbon.item())
@@ -240,7 +240,6 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
             # logger.record_tabular("% time spent exploring", int(exploration * 100)) #int(100 * exploration.value(total_stepct)
             # logger.dump_tabular()
             print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={FCEnv.total_carbon(env.state)}\n")
-
         endtime = time.time()
         data["actions_taken"]= actions_taken
         episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
@@ -260,7 +259,7 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
         print("\n------------------------ %s seconds ------------------------" % (endtime - start_time)) # round(time.time() - start_time, 2)
         print(endtime) # round(time.time() - start_time, 2)
         print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
-        print(f"episode_rewards={episode_rewards}")
+         print(f"episode_rewards={episode_rewards}")
         print(f"start_end={start_end}")
         # print(parameters, "\n")
         # with open("log.txt", 'a') as file:
@@ -273,6 +272,57 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
             # file.write("\n* ending state\n")
             # file.writelines(str(env.state))
         return endtime, actions_taken, episode_rewards, env.state
+
+def run_ckpt(ckpt_path, num_run_steps=100):
+    """Each step corresopnds to 1 year"""
+    act = deepq.deepq.ActWrapper.load_act(ckpt_path) # returns Actwrapper
+    filename = ckpt_path[:-4]
+    env = FCEnv(**parameters)
+    # act = deepq.learn(env, network='mlp', total_timesteps=0, load_path=ckpt_path)
+    actions_taken = []
+    step_rewards = []
+    data = {"checkpoint path": ckpt_path, "soil_carbons":[], "tree_carbons":[], "product_carbons":[], "oldtree_cts":[], "youngtree_cts":[]}
+    state = env.reset()  # returns state
+    for step in range(num_run_steps):
+        soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = env.state 
+        data["soil_carbons"].append(soil_carbon.item())
+        data["tree_carbons"].append(tree_carbon.item())
+        data["product_carbons"].append(product_carbon.item())
+        data["oldtree_cts"].append(oldtree_ct.item())
+        data["youngtree_cts"].append(youngtree_ct.item())
+        env.eco_step(99, delta = 0.01)
+        # if step%25==0: print(f"   [{episode}-{step}] preaction: state={env.state}, exploration={round(exploration, 5)}")
+        action = act(state[None], stochastic=False)[0]
+        new_state, rew, done, info = env.step(action) # updates state
+        actions_taken.append(action.item())
+        step_rewards.append(rew)
+        # if step%25==0: print(f"   \tpostaction: state={env.state}, action={action}")
+        state = new_state
+        if done: 
+            print("Done")
+            return
+    # logger.record_tabular("steps", total_stepct)
+    # logger.record_tabular("episodes", len(episode_rewards))
+    # logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
+    # logger.record_tabular("% time spent exploring", int(exploration * 100)) #int(100 * exploration.value(total_stepct)
+    # logger.dump_tabular()
+    timestamp = time.time()
+    data["actions_taken"]= actions_taken
+    step_rewards = np.array(step_rewards)/num_run_steps
+    data["step_rewards"]= [e.item() for e in step_rewards] # reward per step/year
+    start_end = {
+        "starting total cabron": FCEnv.total_carbon(env.initial_state).item(), "ending total cabron": FCEnv.total_carbon(env.state).item(),
+        "ending state": env.state.tolist(),   "starting state": env.initial_state.tolist()
+    }
+    data["start_end"]=start_end
+    with open(os.path.join(f"{filename}_run_{timestamp}.json"), 'w') as f:      
+        f.write(json.dumps(data, indent=4))
+    print(f"\nSaved: {filename}_run_{timestamp}.json")
+    plot(data, "", f"{filename}_run_{timestamp}")
+    print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
+    print(f"step_rewards={step_rewards}")
+    print(f"start_end={start_end}")
+
 
 def plot_json():
     for f in os.listdir(outdirectory): 
@@ -309,6 +359,7 @@ def param_search():
     return
 
 
+
 if __name__ == '__main__':
     start_time = time.time()
     parameters = {
@@ -322,8 +373,8 @@ if __name__ == '__main__':
         "tree_carbon_o_tonhayear": 0.2, # carbon released tons/ha/year for old trees, NPP_o
         "reproduction_o":0.6, # reproduction rate for old, r_o
         "reproduction_y":0.2, # reproduction rate for young, reproduction_y
-        "tree_carbon_o_mgpertree": 0.076/7, # amount of carbon per old tree (Megagrams), C_o
-        "tree_carbon_y_mgpertree": 0.038/7, # amount of carbon per young tree (Megagrams), C_y
+        "tree_carbon_o_mgpertree": 0.076/10, # amount of carbon per old tree (Megagrams), C_o
+        "tree_carbon_y_mgpertree": 0.038/10, # amount of carbon per young tree (Megagrams), C_y
         "tree_death_o": 0.05, # death rate of old tree, death_o
         "tree_death_y": 0.25 # death rate of young tree, death_y
     }
@@ -333,10 +384,12 @@ if __name__ == '__main__':
         "exploration_end": 0.02,
         "exploration_timestep": 10000 # updated each step of each episode
     }
-    outdirectory = "output"
+    outdirectory = "output2"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
     # eco_run(parameters, undisturbed_steps=10000, record=True)
-    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 100, steps_per_episode=100)
+    # endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 1, steps_per_episode=100)
+    run_ckpt("output2/1645390930.6857603_act.pkl", num_run_steps=200)
+    # "output2/1645390930.6857603_last_episode_vals.pkl"
     print("\nDONE\n")
 
         
@@ -346,6 +399,33 @@ if __name__ == '__main__':
 
 ##### NOTES
 # act: function that choses an action given an observation
+    # _act = U.function(inputs=[observations_ph, stochastic_ph, update_eps_ph],
+    #                          outputs=deterministic_actions,
+    #                          givens={update_eps_ph: -1.0, stochastic_ph: True},
+    #                          updates=[update_eps_expr])
+    # q_values = q_func(observations_ph.get(), num_actions, scope="q_func")         
+    # deterministic_actions = tf.argmax(q_values, axis=1)
+
+    # https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/deepq/build_graph.py#L146
+    # https://github.com/openai/baselines/blob/master/baselines/common/tf_util.py#L134
+    #  function(inputs, outputs, updates=None, givens=None):
+    #     """Just like Theano function. Take a bunch of tensorflow placeholders and expressions
+    #     computed based on those placeholders and produces f(inputs) -> outputs. Function f takes
+    #     values to be fed to the input's placeholders and produces the values of the expressions
+    #     in outputs.
+    #     Input values can be passed in the same order as inputs or can be provided as kwargs based
+    #     on placeholder name (passed to constructor or accessible via placeholder.op.name).
+    #     Example:
+    #         x = tf.placeholder(tf.int32, (), name="x")
+    #         y = tf.placeholder(tf.int32, (), name="y")
+    #         z = 3 * x + 2 * y
+    #         lin = function([x, y], z, givens={y: 0})
+    #         with single_threaded_session():
+    #             initialize()
+    #             assert lin(2) == 6
+    #             assert lin(x=3) == 9
+    #             assert lin(2, 2) == 10
+    #             assert lin(x=2, y=3) == 12
 # train: function that takes a transition (s,a,r,s') and optimizes Bellman equation's error:
     # td_error = Q(s,a) - (r + gamma * max_a' Q(s', a'))
     # loss = huber_loss[td_error]
