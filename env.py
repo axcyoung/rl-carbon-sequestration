@@ -12,6 +12,7 @@ from baselines.deepq.replay_buffer import ReplayBuffer
 from baselines.deepq.utils import ObservationInput
 from baselines.common.schedules import LinearSchedule
 
+import time
 
 # import warnings
 # warnings.filterwarnings("ignore", message=r"Passing", category=FutureWarning)
@@ -79,29 +80,16 @@ def q_learning_discrete():
 class FCEnv(gym.Env):  # the forest carbon env
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, K_T=0.019, K_S=1/6.2, K_P=1/100, r_1=1/37, d_t=656, NPP_y=2.5, NPP_o=0.2):
-        # parameters = {=
-        #     "K_T": 0.019, # tree litterfall rate
-        #     "K_S": 1/6.2, # soil decay
-        #     "K_P": 1/100, # product decay
-        #     "r_1": 1/37, # product decay
-        #     "d_t" : 1, # tree density
-        #     "NPP_y": 2.5, # carbon released tons/ha/year for young trees
-        #     "NPP_o": 0.2, # carbon released tons/ha/year for old trees
-        # }
-        self.age_rate = 0.05 #fraction of young trees converted to old trees
-        self.growth_rate = 1.025 #rate of increase in number of (young) trees
-        self.litter_rate = 0.01 #fraction of tree C converted to soil C
-        self.soil_decay = 0.02 #k constant for soil decay first-order eq
-        self.product_decay = 0.01 #k constant for product decay first-order eq
-
-        self.K_T = K_T
-        self.K_S = K_S
-        self.K_P = K_P
-        self.r_1 = r_1
-        self.d_t = d_t
-        self.NPP_y = NPP_y
-        self.NPP_o = NPP_o
+    def __init__(self, initial_state=np.array([150, 76, 0, 328, 328], dtype=np.float32), 
+                K_T=0.019, K_S=1/6.2, K_P=1/100, r_1=1/37, d_t=656, NPP_y=2.5, NPP_o=0.2):
+        self.initial_state = np.copy(initial_state)
+        self.K_T = K_T # tree litterfall rate
+        self.K_S = K_S # soil decay
+        self.K_P = K_P  # product decay
+        self.r_1 = r_1 # maturation rate (young to old)
+        self.d_t = d_t # tree density
+        self.NPP_y = NPP_y # carbon released tons/ha/year for young trees
+        self.NPP_o = NPP_o # carbon released tons/ha/year for old trees
         self.eco_step_matrix = np.array(
                 [[-1*K_S, K_T, 0, 0, 0], # soil_carbon
                  [0, -1*K_T, 0, 0, 0],   # tree_carbon
@@ -109,20 +97,21 @@ class FCEnv(gym.Env):  # the forest carbon env
                  [0, 0, 0, 0, r_1],    # oldtree_ct
                  [0, 0, 0, 0, -1*r_1]] # youngtree_ct
             ) 
+        print("eco_step_matrix:", self.eco_step_matrix)
         # action: fraction of old trees removed
         self.action_space = gym.spaces.Discrete(101) # 0-1.00 % of old trees to cut down
         # self.action_space = spaces.Box(np.array([1.]), np.array([2]), dtype=np.float32) # porportion of old trees to cut down
             # Box(low=np.array([-1.0, -2.0]), high=np.array([2.0, 4.0]), dtype=np.float32) # [-1,2] for first dimension and [-2,4] for second dimension 
 
         # state/observation = [soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct] (tree species, size/age classes)
-        low = np.zeros( (5,), dtype=np.float32)
+        low = np.zeros((5,), dtype=np.float32)
         high = np.array([float('inf')]*5, dtype=np.float32)
         self.observation_space = spaces.Box(low, high, dtype=np.float32)
         self.state = None # 6 element np array
 
     def reset(self):
         """Returns state value in self.observation_space. Re-start the environment. """
-        self.state = np.array([150, 76, 0, 328, 328], dtype=np.float32)
+        self.state = self.initial_state
         return self.state
 
     def step(self, action):
@@ -137,7 +126,6 @@ class FCEnv(gym.Env):  # the forest carbon env
 
         #1. Apply environmental carbon update to state_t1 (differential equations)
         self.eco_step(1)
-
         frac_tree_cut = max(min(action/100, 1), 0)
         num_tree_cut = oldtree_ct*frac_tree_cut
         oldtree_ct = max(0, oldtree_ct - num_tree_cut)
@@ -156,17 +144,16 @@ class FCEnv(gym.Env):  # the forest carbon env
         self.state = np.array([soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct], dtype=np.float32)
         return self.state, reward, done, {}
 
-    def eco_step(self, num_steps = 1):
+    def eco_step(self, num_steps = 1, delta = 0.01):
         """Updates self.state based on differential equation model of the ecosystem of forest and carbon """
 
         for i in range(num_steps):
             soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = self.state 
             f = TON2MG * (youngtree_ct/self.d_t * self.NPP_y + oldtree_ct/self.d_t * self.NPP_o) # tree growth's intake of carbon
-            g = 0.1* youngtree_ct + 0.2*oldtree_ct # reproduction of trees
-            print(f"eco_step: self.state={self.state}, f={f}, g={g},")
-            self.state += np.matmul(self.eco_step_matrix, self.state) + np.array([0, f, 0, 0, g])  # 2d and 1d  # (5,)
+            g = 0.1*youngtree_ct + 0.2*oldtree_ct # reproduction of trees
+            print(f"eco_step {i}: self.state={self.state}, f={f}, g={g}")
+            self.state += delta * (np.matmul(self.eco_step_matrix, self.state) + np.array([0, f, 0, 0, g]))  # 2d and 1d  # (5,)
 
-    
 
 
 def model(inpt, num_actions, scope, reuse=False):
@@ -178,17 +165,24 @@ def model(inpt, num_actions, scope, reuse=False):
         return out
 
 
-def dqn(parameters, undisturbed = False):
-    # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
+def eco_run(parameters, undisturbed_iter=1000, delta = 0.01):
     with U.make_session(num_cpu=8):
         env = FCEnv(**parameters) # Create the environment
-        # state_space_size = env.observation_space.shape # (5,)
+        env.reset()
+        env.eco_step(undisturbed_iter, delta)
+
+        
+def dqn1(parameters, max_step_ct=100):
+    # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
+    with U.make_session(num_cpu=32):
+        env = FCEnv(**parameters) # Create the environment
         # Create all the functions necessary to train the model
         act, train, update_target, debug = deepq.build_train(
             make_obs_ph=lambda name: ObservationInput(env.observation_space, name=name), # input placeholder for specific observation space
             q_func=model,
             num_actions=env.action_space.n,  # (1,)
             optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
+            gamma = 0.99# relatively long-term
         )
         replay_buffer = ReplayBuffer(50000) # Create the replay buffer, Max number of transitions to store in the buffer
         # Schedule for exploration: 1 (every action is random) -> 0.02 (98% of actions selected by values predicted by model)
@@ -200,21 +194,15 @@ def dqn(parameters, undisturbed = False):
 
         episode_rewards = [0.0] # each ele = reward from one complete run until done
         state = env.reset()  # returns state
-        done = False
-        undisturbedIter=1
         for stepct in itertools.count():
-            if undisturbed:
-                if stepct >= undisturbedIter:
-                    print("------------DONE------------")
-                    return
-                env.eco_step(100)
-                continue # to next step directly
-
+            if stepct>=max_step_ct:
+                return
             env.eco_step(99)
+            print(f"{stepct}-preaction: state={env.state}")
             # Pick action and update exploration to the newest value
             action = act(state[None], stochastic=False, update_eps=exploration.value(stepct))[0] # observation obj (axis added), stochastic boolean, update
             new_state, rew, done, info = env.step(action)
-            print(f"{stepct}: new_state={new_state}")
+            print(f"{stepct}-postaction: state={env.state}")
             # Store transition in the replay buffer.
             replay_buffer.add(state, action, rew, new_state, float(done))
             state = new_state
@@ -243,16 +231,22 @@ def dqn(parameters, undisturbed = False):
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     parameters = {
-        "K_T": 0.019, # tree litterfall rate
-        "K_S": 1/6.2, # soil decay
+        "initial_state": np.array([150, 76, 0, 328, 328], dtype=np.float32),
+        "K_T": 0.008, # tree litterfall rate
+        "K_S": 1/50, # soil decay
         "K_P": 1/100, # product decay
         "r_1": 1/37, # product decay
         "d_t" : 656, # tree density
         "NPP_y": 2.5, # carbon released tons/ha/year for young trees
-        "NPP_o": 0.2, # carbon released tons/ha/year for old trees
+        "NPP_o": 0.2 # carbon released tons/ha/year for old trees
     }
-    dqn(parameters, undisturbed=True)
+    eco_run(parameters, undisturbed_iter=100)
+    # dqn1(parameters, max_step_ct = 100)
+    print("\n", parameters)
+    print("--- %s seconds ---" % (time.time() - start_time)) # round(time.time() - start_time, 2)
+    
 
 
 ##### NOTES
@@ -260,3 +254,4 @@ if __name__ == '__main__':
 # train: function that takes a transition (s,a,r,s') and optimizes Bellman equation's error:
     # td_error = Q(s,a) - (r + gamma * max_a' Q(s', a'))
     # loss = huber_loss[td_error]
+# https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/deepq/build_graph.py#L317
