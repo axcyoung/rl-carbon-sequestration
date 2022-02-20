@@ -106,6 +106,9 @@ class FCEnv(gym.Env):  # the forest carbon env
                  [0, 0, 0, -1*death_o, m_1],    # oldtree_ct
                  [0, 0, 0, 0, -1*m_1+-1*death_y]] # youngtree_ct
             ) 
+        eigenvalues, eigenvectors = np.linalg.eig(self.eco_step_matrix)
+        print("eigenvalues:", eigenvalues)
+        print("eigenvectors:", eigenvectors)
         print("eco_step_matrix:", self.eco_step_matrix)
         # action: fraction of old trees removed
         self.action_space = gym.spaces.Discrete(101) # 0-1.00 % of old trees to cut down
@@ -195,13 +198,14 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
     # https://github.com/openai/baselines/blob/master/baselines/deepq/experiments/custom_cartpole.py
     with U.make_session(num_cpu=32):
         env = FCEnv(**parameters) # Create the environment
+        return
         # Create all the functions necessary to train the model
         act, train, update_target, debug = deepq.build_train(
             make_obs_ph=lambda name: ObservationInput(env.observation_space, name=name), # input placeholder for specific observation space
             q_func=model,
             num_actions=env.action_space.n,  # (1,)
             optimizer=tf.train.AdamOptimizer(learning_rate=5e-4),
-            gamma = 0.99# relatively long-term
+            gamma = 0.5 # relatively long-term
         )
         act_params = {
             'make_obs_ph': lambda name: ObservationInput(env.observation_space, name=name),
@@ -213,8 +217,8 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
         replay_buffer = ReplayBuffer(50000) # Create the replay buffer, Max number of transitions to store in the buffer
         # Schedule for exploration: 1 (every action is random) -> 0.02 (98% of actions selected by values predicted by model)
         # exploration = LinearSchedule(schedule_timesteps=5000, initial_p=1, final_p=1)
-        exploration_start = 0.9
-        exploration_end = 0.02
+        exploration_start = 0
+        exploration_end = 0
         exploration_timestep = 2000
         exploration_change = (exploration_end-exploration_start)/exploration_timestep
         
@@ -244,7 +248,7 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
                 exploration = max(exploration + exploration_change, exploration_end)
 
                 env.eco_step(99, delta = 0.01)
-                if step%25==0: print(f"   [{episode}-{step}] preaction: state={env.state}, exploration={round(exploration, 5)}")
+                # if step%25==0: print(f"   [{episode}-{step}] preaction: state={env.state}, exploration={round(exploration, 5)}")
                 ## Pick action and update exploration to the newest value
                 # action = act(state[None], stochastic=False, update_eps=exploration.value(total_stepct))[0] # observation obj (axis added), stochastic boolean, update
                 action = act(state[None], stochastic=False)[0] if np.random.uniform(0,1) > exploration else env.action_space.sample()
@@ -266,11 +270,11 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
                         train(obses_t, actions, rewards, obses_tp1, dones, np.ones_like(rewards))
             # end of each episode
             update_target() # Update target network periodically.
-            logger.record_tabular("steps", total_stepct)
-            logger.record_tabular("episodes", len(episode_rewards))
-            logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
-            logger.record_tabular("% time spent exploring", int(exploration * 100)) #int(100 * exploration.value(total_stepct)
-            logger.dump_tabular()
+            # logger.record_tabular("steps", total_stepct)
+            # logger.record_tabular("episodes", len(episode_rewards))
+            # logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
+            # logger.record_tabular("% time spent exploring", int(exploration * 100)) #int(100 * exploration.value(total_stepct)
+            # logger.dump_tabular()
             print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={env.total_carbon()}\n")
 
         endtime = time.time()
@@ -278,7 +282,7 @@ def dqn2(parameters, max_episode_num = 10, steps_per_episode=100):
         with open(f"output/{endtime}_last_episode_vals.json", 'w') as f:
             f.write(json.dumps({"soil_carbons":str(soil_carbons), "tree_carbons":str(tree_carbons), "product_carbons":str(product_carbons), 
                 "oldtree_cts":str(oldtree_cts), "youngtree_cts":str(youngtree_cts)}, indent=4))
-        episode_rewards = np.array(episode_rewards)/steps_per_episode
+        episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
         # act.save(f"output/{endtime}_act.pkl")
         return endtime, actions_taken, episode_rewards, env.state
 
@@ -299,12 +303,12 @@ if __name__ == '__main__':
         "C_o": 0.076, # 76
         "C_y": 0.038, # 38
         "death_o": 0.05, 
-        "death_y": 0.1
+        "death_y": 0.25
     }
 
     # eco_run(parameters, undisturbed_iter=2000)
     # dqn1(parameters, max_step_ct = 1000)
-    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, max_episode_num = 10, steps_per_episode=100)
+    endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, max_episode_num = 100, steps_per_episode=100)
     print("\n------------------------ %s seconds ------------------------" % (endtime - start_time)) # round(time.time() - start_time, 2)
     print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
     print(f"episode_rewards={episode_rewards}")
@@ -313,11 +317,11 @@ if __name__ == '__main__':
     with open("log.txt", 'a') as file:
         file.write(f"\n\n\n#####{endtime}#####\n")
         file.writelines(str(parameters))
-        file.write("\n")
+        file.write("\n* actions_taken\n")
         file.writelines(str(np.array(actions_taken[-300:])))
-        file.write("\n")
+        file.write("\n* episode_rewards\n") # reward per step/year
         file.writelines(str(episode_rewards))
-        file.write("\n")
+        file.write("\n* ending state\n")
         file.writelines(str(ending_state))
 
         
