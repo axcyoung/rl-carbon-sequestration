@@ -33,29 +33,29 @@ class FCEnv(gym.Env):  # the forest carbon env
     metadata = {'render.modes': ['human']}
 
     def __init__(self, initial_state=np.array([150, 76, 0, 328, 328], dtype=np.float32), 
-                K_T=0.019, K_S=1/6.2, K_P=1/100, m_1=1/37, d_t=656, NPP_y=2.5, NPP_o=0.2, 
-                r_o=0.6, r_y=0.2, C_o = 0.076, C_y = 0.038, death_o = 0.05, death_y=0.1):
+                litterfall_rate=0.019, soil_decay=1/6.2, product_decay=1/100, tree_mature_rate=1/37, tree_density=656, tree_carbon_y_tonhayear=2.5, tree_carbon_o_tonhayear=0.2, 
+                reproduction_o=0.6, reproduction_y=0.2, tree_carbon_o_mgpertree = 0.076, tree_carbon_y_mgpertree = 0.038, tree_death_o = 0.05, tree_death_y=0.1):
         self.initial_state = np.copy(initial_state)
-        self.K_T = K_T # tree litterfall rate
-        self.K_S = K_S # soil decay
-        self.K_P = K_P  # product decay
-        self.m_1 = m_1 # maturation rate (young to old)
-        self.d_t = d_t # tree density
-        self.NPP_y = NPP_y # carbon released tons/ha/year for young trees
-        self.NPP_o = NPP_o # carbon released tons/ha/year for old trees
-        self.r_o = r_o # reproduction rate for old
-        self.r_y = r_y # reproduction rate for young
-        self.C_o = C_o # amount of carbon per tree (Megagrams)
-        self.C_y = C_y # amount of carbon per tree (Megagrams)
-        self.death_o = death_o # death rate of old
-        self.death_y = death_y # death rate of young
+        self.litterfall_rate = litterfall_rate # tree litterfall rate
+        self.soil_decay = soil_decay # soil decay
+        self.product_decay = product_decay  # product decay
+        self.tree_mature_rate = tree_mature_rate # maturation rate (young to old)
+        self.tree_density = tree_density # tree density
+        self.tree_carbon_y_tonhayear = tree_carbon_y_tonhayear # carbon released tons/ha/year for young trees
+        self.tree_carbon_o_tonhayear = tree_carbon_o_tonhayear # carbon released tons/ha/year for old trees
+        self.reproduction_o = reproduction_o # reproduction rate for old
+        self.reproduction_y = reproduction_y # reproduction rate for young
+        self.tree_carbon_o_mgpertree = tree_carbon_o_mgpertree # amount of carbon per old tree (Megagrams)
+        self.tree_carbon_y_mgpertree = tree_carbon_y_mgpertree # amount of carbon per young tree (Megagrams)
+        self.tree_death_o = tree_death_o # death rate of old
+        self.tree_death_y = tree_death_y # death rate of young
 
         self.eco_step_matrix = np.array(
-                [[-1*K_S, K_T, 0, C_o*death_o, C_y*death_y], # soil_carbon
-                 [0, -1*K_T, 0, -1*C_o*death_o, -1*C_y*death_y],   # tree_carbon
-                 [0, 0, -1*K_P, 0, 0],   # product_carbon
-                 [0, 0, 0, -1*death_o, m_1],    # oldtree_ct
-                 [0, 0, 0, 0, -1*m_1+-1*death_y]] # youngtree_ct
+                [[-1*soil_decay, litterfall_rate, 0, tree_carbon_o_mgpertree*tree_death_o, tree_carbon_y_mgpertree*tree_death_y], # soil_carbon
+                 [0, -1*litterfall_rate, 0, -1*tree_carbon_o_mgpertree*tree_death_o, -1*tree_carbon_y_mgpertree*tree_death_y],   # tree_carbon
+                 [0, 0, -1*product_decay, 0, 0],   # product_carbon
+                 [0, 0, 0, -1*tree_death_o, tree_mature_rate],    # oldtree_ct
+                 [0, 0, 0, 0, -1*tree_mature_rate+-1*tree_death_y]] # youngtree_ct
             ) 
         eigenvalues, eigenvectors = np.linalg.eig(self.eco_step_matrix)
         print("eigenvalues:", eigenvalues)
@@ -93,8 +93,8 @@ class FCEnv(gym.Env):  # the forest carbon env
         frac_tree_cut = max(min(action/100, 1), 0)
         num_tree_cut = oldtree_ct*frac_tree_cut
         oldtree_ct = max(0, oldtree_ct - num_tree_cut)
-        tree_carbon = max(0, tree_carbon-num_tree_cut*self.C_o) # each tree has 0.1 
-        product_carbon += num_tree_cut*self.C_o*1/2 # loses half
+        tree_carbon = max(0, tree_carbon-num_tree_cut*self.tree_carbon_o_mgpertree) # each tree has 0.1 
+        product_carbon += num_tree_cut*self.tree_carbon_o_mgpertree*1/2 # loses half
 
         carbon_sequestered = tree_carbon+soil_carbon+product_carbon - orig_total_carbon
         # print(f"\taction={action}, frac_tree_cut={frac_tree_cut}, num_tree_cut={num_tree_cut}, carbon_sequestered={carbon_sequestered}")
@@ -114,8 +114,8 @@ class FCEnv(gym.Env):  # the forest carbon env
             data = {"soil_carbons":[], "tree_carbons":[], "product_carbons":[], "oldtree_cts":[], "youngtree_cts":[]}
         for i in range(num_steps):
             soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = self.state 
-            f = TON2MG * (youngtree_ct/self.d_t * self.NPP_y + oldtree_ct/self.d_t * self.NPP_o) # tree growth's intake of carbon
-            g = self.r_y*youngtree_ct + self.r_o*oldtree_ct # reproduction of trees
+            f = TON2MG * (youngtree_ct/self.tree_density * self.tree_carbon_y_tonhayear + oldtree_ct/self.tree_density * self.tree_carbon_o_tonhayear) # tree growth's intake of carbon
+            g = self.reproduction_y*youngtree_ct + self.reproduction_o*oldtree_ct # reproduction of trees
             # if (i % 100 == 0) or (i == num_steps-1):
             #     print(f"eco_step {i}: self.state={self.state}, f={f}, g={g}")
             self.state += delta * (np.matmul(self.eco_step_matrix, self.state) + np.array([0, f, 0, 0, g]))  # 2d and 1d  # (5,)
@@ -134,8 +134,8 @@ class FCEnv(gym.Env):  # the forest carbon env
             print(f"\nSaved: {timestamp}_econrun")
     
     
-    def total_carbon(self):
-        soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = self.state
+    def total_carbon(state):
+        soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = state
         return soil_carbon + tree_carbon + product_carbon
 
 
@@ -239,7 +239,7 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
             # logger.record_tabular("mean episode reward", round(np.mean(episode_rewards[-101:-1]), 1))
             # logger.record_tabular("% time spent exploring", int(exploration * 100)) #int(100 * exploration.value(total_stepct)
             # logger.dump_tabular()
-            print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={env.total_carbon()}\n")
+            print(f"### episode {episode} ### episode reward={episode_rewards[-1]} | Total carbon={FCEnv.total_carbon(env.state)}\n")
 
         endtime = time.time()
         data["actions_taken"]= actions_taken
@@ -247,6 +247,11 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
         data["episode_rewards"]= [e.item() for e in episode_rewards]
         data["parameters"]= str(parameters)
         data["dqnparams"]= str(dqnparams)
+        start_end = {
+            "starting total cabron": FCEnv.total_carbon(env.initial_state).item(), "ending state": env.state.tolist(),
+            "starting state": env.initial_state.tolist(), "ending total cabron": FCEnv.total_carbon(env.state).item()
+        }
+        data["start_end"]=start_end
         with open(os.path.join(outdirectory, f"{endtime}_last_episode_vals.json"), 'w') as f:      
             f.write(json.dumps(data, indent=4))
         print(f"\nSaved: {endtime}_last_episode_vals.json")
@@ -256,7 +261,7 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100):
         print(endtime) # round(time.time() - start_time, 2)
         print(f"actions_taken={actions_taken}, Number of actions_taken={len(actions_taken)}")
         print(f"episode_rewards={episode_rewards}")
-        # print(f"ending_state={env.state}")
+        print(f"start_end={start_end}")
         # print(parameters, "\n")
         # with open("log.txt", 'a') as file:
             # file.write(f"\n\n\n#####{endtime}#####\n")
@@ -279,18 +284,18 @@ def plot_json():
         
 def plot(data, directory, filename):
         x = list(range(len(data["oldtree_cts"])))
-        fig, axs = plt.subplots(ncols=1, nrows=2, sharex='all', figsize=(12, 12)) 
+        fig, axs = plt.subplots(ncols=1, nrows=2, figsize=(12, 12)) # sharex='all'
         plt.suptitle("Forest and Carbon State over 100 Years under Trained Agent's Forest Management", fontsize=16) # timestamp
         axs[0].plot(x, data["oldtree_cts"], label="Old trees")
         axs[0].plot(x, data["youngtree_cts"], label="Young trees")
-        axs[0].set_xlabel("Time (year)", fontsize=13)
+        axs[0].set_xlabel("Time", fontsize=13)
         axs[0].set_ylabel("Number of Trees", fontsize=13)
         axs[0].set_title("Number of Trees over 100 Years from Forest Management Plan", fontsize=13)
         axs[0].legend()
         axs[1].plot(x, data["soil_carbons"], label="soil_carbons")
         axs[1].plot(x, data["tree_carbons"], label="tree_carbons")
         axs[1].plot(x, data["product_carbons"], label="product_carbons")
-        axs[1].set_xlabel("Time (year)", fontsize=13)
+        axs[1].set_xlabel("Time", fontsize=13)
         axs[1].set_ylabel("Amount of Carbon Sequestered (Mg)", fontsize=13)
         axs[1].set_title("Amount of Carbon Sequestered over 100 Years from Forest Management Plan", fontsize=13)
         axs[1].legend()
@@ -308,19 +313,19 @@ if __name__ == '__main__':
     start_time = time.time()
     parameters = {
         "initial_state": np.array([150, 76, 0, 328, 328], dtype=np.float32), # soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct
-        "K_T": 0.008, # tree litterfall rate
-        "K_S": 1/50, # soil decay
-        "K_P": 1/10, # product decay
-        "m_1": 1/37, # product decay
-        "d_t" : 656, # tree density
-        "NPP_y": 2.5, # carbon released tons/ha/year for young trees
-        "NPP_o": 0.2, # carbon released tons/ha/year for old trees
-        "r_o":0.6,
-        "r_y":0.2,
-        "C_o": 0.076, # 76
-        "C_y": 0.038, # 38
-        "death_o": 0.05, 
-        "death_y": 0.25
+        "litterfall_rate": 0.008, # tree litterfall rate, K_T
+        "soil_decay": 0.1, # soil decay, K_S
+        "product_decay": 0.01, # product decay, K_P
+        "tree_mature_rate": 1/37, # maturation rate (young to old), m_1
+        "tree_density" : 656, # tree density, d_t
+        "tree_carbon_y_tonhayear": 2.5, # carbon released tons/ha/year for young trees, NPP_y
+        "tree_carbon_o_tonhayear": 0.2, # carbon released tons/ha/year for old trees, NPP_o
+        "reproduction_o":0.6, # reproduction rate for old, r_o
+        "reproduction_y":0.2, # reproduction rate for young, reproduction_y
+        "tree_carbon_o_mgpertree": 0.076/7, # amount of carbon per old tree (Megagrams), C_o
+        "tree_carbon_y_mgpertree": 0.038/7, # amount of carbon per young tree (Megagrams), C_y
+        "tree_death_o": 0.05, # death rate of old tree, death_o
+        "tree_death_y": 0.25 # death rate of young tree, death_y
     }
     dqnparams = {
         "gamma": 0.99, # discount factor
@@ -329,6 +334,7 @@ if __name__ == '__main__':
         "exploration_timestep": 10000 # updated each step of each episode
     }
     outdirectory = "output"
+    if not os.path.exists(outdirectory): os.makedirs(outdirectory)
     # eco_run(parameters, undisturbed_steps=10000, record=True)
     endtime, actions_taken, episode_rewards, ending_state = dqn2(parameters, dqnparams, max_episode_num = 100, steps_per_episode=100)
     print("\nDONE\n")
