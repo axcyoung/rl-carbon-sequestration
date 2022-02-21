@@ -101,6 +101,7 @@ class FCEnv(gym.Env):  # the forest carbon env
 
         soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct, tree_carbon2, oldtree_ct2, youngtree_ct2 = self.state # State at t (action picked after 00 updates)
         orig_total_carbon = tree_carbon + soil_carbon + product_carbon + tree_carbon2
+        orig_abundance = oldtree_ct+youngtree_ct+oldtree_ct2+youngtree_ct2
         orig_biodiversity = compute_biodiversity(oldtree_ct, youngtree_ct, oldtree_ct2, youngtree_ct2)
         # 1. Apply environmental carbon update to state_t1 (differential equations)
         self.eco_step(1)
@@ -117,9 +118,11 @@ class FCEnv(gym.Env):  # the forest carbon env
         # 3. Calculate rewards
         carbon_sequestered = tree_carbon+soil_carbon+product_carbon+tree_carbon2 - orig_total_carbon
         biodiversity_change = compute_biodiversity(oldtree_ct, youngtree_ct, oldtree_ct2, youngtree_ct2) - orig_biodiversity
+        abundance_change = oldtree_ct+youngtree_ct+oldtree_ct2+youngtree_ct2 - orig_abundance
         # econ_profit
-        # QUESTION
-        reward = dqnparams["carbon_reward_weight"]*tanh(carbon_sequestered) + (1-dqnparams["carbon_reward_weight"])*tanh(biodiversity_change)
+        reward = dqnparams["carbon_reward_weight"]*tanh(carbon_sequestered) +  \
+                (dqnparams["biodiversiy_weight"])*tanh(biodiversity_change) + \
+                (dqnparams["abundance_weight"])*tanh(abundance_change)
 
         done = bool(youngtree_ct + oldtree_ct == 0.0)
     
@@ -224,8 +227,8 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100, sav
                 env.eco_step(99, delta = 0.01)
                 action = act(state[None], stochastic=False)[0] if np.random.uniform(0,1) > exploration else np.int64(env.action_space.sample()) # observation obj (axis added), stochastic boolean, update
                 new_state, rew, done, info = env.step(action) # updates state
-                actions_taken1.append(int(action.item()/20)*5/100) # for species 1
-                actions_taken2.append((action.item()%20)*5/100) # for species 2
+                actions_taken1.append(int(action.item()/20)*5) # for species 1
+                actions_taken2.append((action.item()%20)*5) # for species 2
                 episode_rewards[-1] += rew
                 ## Store transition in the replay buffer.
                 replay_buffer.add(state, action, rew, new_state, float(done))
@@ -292,8 +295,8 @@ def validate_run(env, act, filename, parameters, dqnparams, num_run_steps=100):
         action = act(state[None], stochastic=False)[0]
         new_state, rew, done, info = env.step(action) # updates state
         data["step_rewards"].append(rew) # reward per step/year
-        data["actions_taken1"].append(int(action.item()/20)*5/100) # for species 1
-        data["actions_taken2"].append((action.item()%20)*5/100) # for species 2
+        data["actions_taken1"].append(int(action.item()/20)*5) # for species 1
+        data["actions_taken2"].append((action.item()%20)*5) # for species 2
         state = new_state
         if done: 
             print("Done")
@@ -442,8 +445,9 @@ def plot_eco(data, directory, filename):
 def compute_biodiversity(oldtree_ct, youngtree_ct, oldtree_ct2, youngtree_ct2):
     """Shannon's entropy. Biodiversity peaked when porp1=porp2=0.5"""
     total_ct = oldtree_ct+youngtree_ct+oldtree_ct2+youngtree_ct2
+    if total_ct==0: return -5 # penalty for harvesting all trees 
     porp1 = (oldtree_ct+youngtree_ct)/total_ct
-    porp2 = (oldtree_ct+youngtree_ct2)/total_ct
+    porp2 = (oldtree_ct2+youngtree_ct2)/total_ct
     bio = math.exp( -1*(porp1)*math.log(porp1) -1*(porp2)*math.log(porp2) )
     return bio
 
@@ -491,11 +495,13 @@ if __name__ == '__main__':
         "exploration_start": 1,
         "exploration_end": 0.02,
         "exploration_timestep": 10000, # updated each step of each episode
-        "carbon_reward_weight": 1
+        "carbon_reward_weight": 0,
+        "biodiversiy_weight": 0.5,
+        "abundance_weight": 0.5
     }
-    outdirectory = "multi"
+    outdirectory = "multi-bioabsabundance"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
-    eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
+    # eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
     dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
     # run_ckpt("baseline/1645405750.802999_499.pkl", num_run_steps=100)
     # "output2/1645390930.6857603_last_episode_vals.pkl"
