@@ -7,6 +7,7 @@ import os
 import itertools
 import json
 import time
+import math
 import matplotlib.pyplot as plt
 import tensorflow.contrib.layers as layers
 import baselines.common.tf_util as U
@@ -25,7 +26,8 @@ from baselines.common.schedules import LinearSchedule
 # logging.getLogger('tensorflow').disabled = True
 # tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR) # surpress warning
 # tf.get_logger().setLevel('ERROR')
-# TON2MG = 0.907185
+
+TON2MG = 0.907185
 
 class FCEnv(gym.Env):  # the forest carbon env
     metadata = {'render.modes': ['human']}
@@ -85,6 +87,8 @@ class FCEnv(gym.Env):  # the forest carbon env
 
         soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct = self.state # State at t (action picked after 00 updates)
         orig_total_carbon = tree_carbon + soil_carbon + product_carbon
+        orig_abundance = oldtree_ct+youngtree_ct
+        orig_product_carbon = product_carbon
         # 1. Apply environmental carbon update to state_t1 (differential equations)
         self.eco_step(1)
         # 2. Apply action
@@ -95,11 +99,14 @@ class FCEnv(gym.Env):  # the forest carbon env
         product_carbon += num_tree_cut*self.tree_carbon_o_mgpertree*3/4 # loses 25%
         # 3. Calculate rewards
         carbon_sequestered = tree_carbon+soil_carbon+product_carbon - orig_total_carbon
-        # econ_profit = 
+        abundance_change = oldtree_ct+youngtree_ct - orig_abundance
+        economic_change = product_carbon-orig_product_carbon
         # print(f"\taction={action}, frac_tree_cut={frac_tree_cut}, num_tree_cut={num_tree_cut}, carbon_sequestered={carbon_sequestered}")
         # TODO: each reward softmax -> weight
 
-        reward = 1.0 * carbon_sequestered #can have different reward function
+        reward = dqnparams["carbon_reward_weight"]*tanh(carbon_sequestered) + \
+                 dqnparams["abundance_weight"]*tanh(abundance_change) + \
+                 dqnparams["economic_weight"]*tanh(economic_change)
 
         done = bool(youngtree_ct + oldtree_ct == 0.0)
     
@@ -218,7 +225,7 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100, sav
                 env.reset()
                 validate_run(env, act, os.path.join(outdirectory, f"{start_time}_{episode}"), parameters, dqnparams, num_run_steps=100)
             
-        total_data = {"parameters": str(parameters), "dqnparams": str(dqnparams), "actions_taken": actions_taken, "episode_rewards": [e.item() for e in episode_rewards]}
+        total_data = {"parameters": str(parameters), "dqnparams": str(dqnparams), "actions_taken": actions_taken, "episode_rewards": episode_rewards}
             # episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
         plot_rewardsactions(total_data, outdirectory, f"{start_time}_training") # plot episode rewards
         print(f"Saved: {start_time}_training.jpg")
@@ -257,7 +264,7 @@ def validate_run(env, act, filename, parameters, dqnparams, num_run_steps=100):
         env.eco_step(99, delta = 0.01)
         action = act(state[None], stochastic=False)[0]
         new_state, rew, done, info = env.step(action) # updates state
-        data["step_rewards"].append(rew.item()) # reward per step/year
+        data["step_rewards"].append(rew) # reward per step/year
         data["actions_taken"].append(action.item())
         state = new_state
         if done: 
@@ -295,7 +302,7 @@ def run_ckpt(ckpt_path, num_run_steps=100):
         env.eco_step(99, delta = 0.01)
         action = act(state[None], stochastic=False)[0]
         new_state, rew, done, info = env.step(action) # updates state
-        data["step_rewards"].append(rew.item()) # reward per step/year
+        data["step_rewards"].append(rew) # reward per step/year
         data["actions_taken"].append(action.item())
         state = new_state
         if done: 
@@ -395,6 +402,9 @@ def plot_eco(data, directory, filename):
     plt.savefig(os.path.join(directory, f"{filename}.jpg"))
 
 
+def tanh(x):
+    return (math.exp(2*x)-1)/(math.exp(2*x)+1)
+
 def param_search():
     # x = np.linspace(0, 1, nx)
     # y = np.linspace(0, 1, ny)
@@ -408,7 +418,7 @@ if __name__ == '__main__':
         "initial_state": np.array([150, 76, 0, 328, 328], dtype=np.float32), # soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct
         "litterfall_rate": 0.01, # tree litterfall rate, K_T
         "soil_decay": 0.02, # soil decay, K_S
-        "product_decay": 1, # product decay, K_P
+        "product_decay": 0.01, # product decay, K_P
         "tree_mature_rate": 1/37, # maturation rate (young to old), m_1
         "tree_density" : 656, # tree density, d_t
         "tree_carbon_y_tonhayear": 3, # carbon tons/ha/year for young trees, NPP_y
@@ -419,24 +429,28 @@ if __name__ == '__main__':
         "tree_carbon_y_mgpertree": 0.038/8, # amount of carbon per young tree (Megagrams), C_y
         "tree_death_o": 0.05, # death rate of old tree, death_o
         "tree_death_y": 0.25, # death rate of young tree, death_y,
-        "carrying_capacity": 10000 # carraying capacity of the forest
+        "carrying_capacity": 2000 # carraying capacity of the forest
     }
     dqnparams = {
         "gamma": 0.99, # discount factor
         "exploration_start": 1,
         "exploration_end": 0.02,
-        "exploration_timestep": 10000 # updated each step of each episode
+        "exploration_timestep": 10000, # updated each step of each episode
+        "carbon_reward_weight": 0.5,
+        "abundance_weight": 0.5,
+        "economic_weight": 0
     }
-    outdirectory = "baseline-lessH-moreproductdecay"
+    outdirectory = "baseline-less-carbonabundance"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
-    eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
-    dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
+    # eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
+    dqn2(parameters, dqnparams, max_episode_num = 100, steps_per_episode=100, save_frequency=10)
     # run_ckpt("baseline/1645405750.802999_499.pkl", num_run_steps=100)
     # "output2/1645390930.6857603_last_episode_vals.pkl"
     print("\n", outdirectory, "\nDONE\n")
 
         
     
+
     
 
 
