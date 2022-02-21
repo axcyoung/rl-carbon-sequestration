@@ -247,7 +247,7 @@ def dqn2(parameters, dqnparams, max_episode_num = 10, steps_per_episode=100, sav
                 validate_run(env, act, os.path.join(outdirectory, f"{start_time}_{episode}"), parameters, dqnparams, num_run_steps=100)
             
         total_data = {"parameters": str(parameters), "dqnparams": str(dqnparams), "actions_taken1": actions_taken1, "actions_taken2": actions_taken2, 
-                    "combined_actions": list(zip(actions_taken1, actions_taken2)), "episode_rewards": [e.item() for e in episode_rewards]}
+                    "combined_actions": list(zip(actions_taken1, actions_taken2)), "episode_rewards": episode_rewards}
             # episode_rewards = np.array(episode_rewards)/steps_per_episode # reward per step/year
         plot_rewardsactions(total_data, outdirectory, f"{start_time}_training") # plot episode rewards
         print(f"Saved: {start_time}_training.jpg")
@@ -284,14 +284,14 @@ def validate_run(env, act, filename, parameters, dqnparams, num_run_steps=100):
         data["product_carbons"].append(product_carbon.item())
         data["oldtree_cts"].append(oldtree_ct.item())
         data["youngtree_cts"].append(youngtree_ct.item())
-        data["tree_carbon2s"].append(tree_carbon2.item())
+        data["tree_carbons2"].append(tree_carbon2.item())
         data["oldtree_cts2"].append(oldtree_ct2.item())
         data["youngtree_cts2"].append(youngtree_ct2.item())
 
         env.eco_step(99, delta = 0.01)
         action = act(state[None], stochastic=False)[0]
         new_state, rew, done, info = env.step(action) # updates state
-        data["step_rewards"].append(rew.item()) # reward per step/year
+        data["step_rewards"].append(rew) # reward per step/year
         data["actions_taken1"].append(int(action.item()/20)*5/100) # for species 1
         data["actions_taken2"].append((action.item()%20)*5/100) # for species 2
         state = new_state
@@ -330,7 +330,7 @@ def validate_run(env, act, filename, parameters, dqnparams, num_run_steps=100):
 #         env.eco_step(99, delta = 0.01)
 #         action = act(state[None], stochastic=False)[0]
 #         new_state, rew, done, info = env.step(action) # updates state
-#         data["step_rewards"].append(rew.item()) # reward per step/year
+#         data["step_rewards"].append(rew) # reward per step/year
 #         data["actions_taken"].append(action.item())
 #         state = new_state
 #         if done: 
@@ -365,19 +365,19 @@ def plot_with_rewards(data, directory, filename):
     fig.subplots_adjust(hspace=0.3)
     plt.suptitle("Multispecies Forest and Carbon State over 100 Years under Trained Agent's Forest Management", fontsize=16) 
     axs[0].set_title("Number of Trees over 100 Years from Forest Management Plan", fontsize=15)
-    axs[0].plot(x, data["oldtree_cts"], label="Old trees - species 1")
-    axs[0].plot(x, data["youngtree_cts"], label="Young trees - species 1")
-    axs[0].plot(x, data["oldtree_cts2"], label="Old trees - species 2")
-    axs[0].plot(x, data["youngtree_cts2"], label="Young trees - species 2")
+    axs[0].plot(x, data["oldtree_cts"], label="Old Trees - Species 1")
+    axs[0].plot(x, data["youngtree_cts"], label="Young Trees - Species 1")
+    axs[0].plot(x, data["oldtree_cts2"], label="Old Trees - Species 2")
+    axs[0].plot(x, data["youngtree_cts2"], label="Young Trees - Species 2")
     axs[0].set_xlabel("Time (years)", fontsize=14)
     axs[0].set_ylabel("Number of Trees", fontsize=14)
     axs[0].legend()
     
     axs[1].set_title("Amount of Carbon Sequestered over 100 Years from Multispecies Forest Management Plan", fontsize=15)
-    axs[1].plot(x, data["soil_carbons"], label="Soil carbon")
-    axs[1].plot(x, data["tree_carbons"], label="Tree carbon - species 1")
-    axs[1].plot(x, data["tree_carbons2"], label="Tree carbon - species 2")
-    axs[1].plot(x, data["product_carbons"], label="Product carbon")
+    axs[1].plot(x, data["soil_carbons"], label="Soil Carbon")
+    axs[1].plot(x, data["tree_carbons"], label="Tree 1 Carbon")
+    axs[1].plot(x, data["tree_carbons2"], label="Tree 2 Carbon")
+    axs[1].plot(x, data["product_carbons"], label="Product Carbon")
     axs[1].set_xlabel("Time (years)", fontsize=14)
     axs[1].set_ylabel("Amount of Carbon Sequestered (Mg)", fontsize=14)
     axs[1].legend(fontsize=13)
@@ -387,8 +387,8 @@ def plot_with_rewards(data, directory, filename):
     axs[2].plot(x, data["step_rewards"], label="Rewards", color="blue")
     axs[2].set_ylabel("Rewards", fontsize=14)
     axtwin=axs[2].twinx()  # make a plot with different y-axis on same graph
-    axtwin.plot(x, data["actions_taken1"], label="Percentage of Trees Harvested - species 1", color="green")
-    axtwin.plot(x, data["actions_taken2"], label="Percentage of Trees Harvested - species 2", color="brown")
+    axtwin.plot(x, data["actions_taken1"], label="Percentage of Trees Harvested - Species 1", color="green")
+    axtwin.plot(x, data["actions_taken2"], label="Percentage of Trees Harvested - Species 2", color="brown")
     axtwin.set_ylabel("Yearly Percentage of Trees Harvested",fontsize=14)
     axs[2].legend(loc='upper left', fontsize=13)
     axtwin.legend(loc='upper right', fontsize=13)
@@ -422,18 +422,18 @@ def plot_eco(data, directory, filename):
     fig, axs = plt.subplots(ncols=1, nrows=2, figsize=(12, 12)) # sharex='all'
     plt.suptitle("Multispecices Forest and Carbon State over 100 Years under Trained Agent's Forest Management", fontsize=16) 
     axs[0].set_title("Number of Trees over 100 Years from Forest Management Plan", fontsize=15)
-    axs[0].plot(x, data["oldtree_cts"], label="Old trees - species 1")
-    axs[0].plot(x, data["youngtree_cts"], label="Young trees - species 1")
-    axs[0].plot(x, data["oldtree_cts2"], label="Old trees - species 2")
-    axs[0].plot(x, data["youngtree_cts2"], label="Young trees - species 2")
+    axs[0].plot(x, data["oldtree_cts"], label="Old Trees - Species 1")
+    axs[0].plot(x, data["youngtree_cts"], label="Young Trees - Species 1")
+    axs[0].plot(x, data["oldtree_cts2"], label="Old Trees - Species 2")
+    axs[0].plot(x, data["youngtree_cts2"], label="Young Trees - Species 2")
     axs[0].set_xlabel("Time (years)", fontsize=15)
     axs[0].set_ylabel("Number of Trees", fontsize=15)
     axs[0].legend(fontsize=14)
     axs[1].set_title("Amount of Carbon Sequestered over 100 Years from Forest Management Plan", fontsize=15)
-    axs[1].plot(x, data["soil_carbons"], label="soil_carbons")
-    axs[1].plot(x, data["tree_carbons"], label="tree_carbons1")
-    axs[1].plot(x, data["tree_carbons2"], label="tree_carbons2")
-    axs[1].plot(x, data["product_carbons"], label="product_carbons")
+    axs[1].plot(x, data["soil_carbons"], label="Soil Carbon")
+    axs[1].plot(x, data["tree_carbons"], label="Tree 1 Carbon")
+    axs[1].plot(x, data["tree_carbons2"], label="Tree 2 Carbon")
+    axs[1].plot(x, data["product_carbons"], label="Product Carbon")
     axs[1].set_xlabel("Time (years)", fontsize=15)
     axs[1].set_ylabel("Amount of Carbon Sequestered (Mg)", fontsize=15)
     axs[1].legend(fontsize=14)
@@ -466,19 +466,19 @@ if __name__ == '__main__':
         "soil_decay": 0.02, # soil decay, K_S
         "product_decay": 0.01, # product decay, K_P
         "tree_mature_rate": 1/37, # maturation rate (young to old), m_1
-        "tree_mature_rate2": 1/37, # maturation rate (young to old), m_1                         ## NEW
+        "tree_mature_rate2": 1/25, # maturation rate (young to old), m_1                          ## NEW
         "tree_density" : 656, # tree density, d_t
         "tree_carbon_y_tonhayear": 3, # carbon tons/ha/year for young trees, NPP_y
         "tree_carbon_o_tonhayear": 1, # carbon tons/ha/year for old trees, NPP_o  
-        "tree_carbon_y_tonhayear2": 3, # carbon tons/ha/year for young trees, NPP_y               ## NEW
-        "tree_carbon_o_tonhayear2": 1, # carbon tons/ha/year for old trees, NPP_o              ## NEW
+        "tree_carbon_y_tonhayear2": 5, # carbon tons/ha/year for young trees, NPP_y               ## NEW
+        "tree_carbon_o_tonhayear2": 0.5, # carbon tons/ha/year for old trees, NPP_o               ## NEW
         "reproduction_o":0.6, # reproduction rate for old, r_o
         "reproduction_y":0.2, # reproduction rate for young, reproduction_y
-        "reproduction_o2":0.6, # reproduction rate for old, r_o                                  ## NEW
-        "reproduction_y2":0.2, # reproduction rate for young, reproduction_y                     ## NEW
+        "reproduction_o2":0.8, # reproduction rate for old, r_o                                   ## NEW
+        "reproduction_y2":0.01, # reproduction rate for young, reproduction_y                     ## NEW
         "tree_carbon_o_mgpertree": 0.076/8, # amount of carbon per old tree (Megagrams), C_o
         "tree_carbon_y_mgpertree": 0.038/8, # amount of carbon per young tree (Megagrams), C_y
-        "tree_carbon_o_mgpertree2": 0.076/8, # amount of carbon per old tree (Megagrams), C_o     ## NEW
+        "tree_carbon_o_mgpertree2": 0.076/4, # amount of carbon per old tree (Megagrams), C_o     ## NEW
         "tree_carbon_y_mgpertree2": 0.038/8, # amount of carbon per young tree (Megagrams), C_y   ## NEW
         "tree_death_o": 0.05, # death rate of old tree, death_o
         "tree_death_y": 0.25, # death rate of young tree, death_y,
@@ -491,12 +491,12 @@ if __name__ == '__main__':
         "exploration_start": 1,
         "exploration_end": 0.02,
         "exploration_timestep": 10000, # updated each step of each episode
-        "carbon_reward_weight": 0.8
+        "carbon_reward_weight": 1
     }
-    outdirectory = "multi-baseline"
+    outdirectory = "multi"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
     eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
-    # dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
+    dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
     # run_ckpt("baseline/1645405750.802999_499.pkl", num_run_steps=100)
     # "output2/1645390930.6857603_last_episode_vals.pkl"
     print("\n", outdirectory, "\nDONE\n")
