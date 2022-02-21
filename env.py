@@ -33,6 +33,19 @@ class FCEnv(gym.Env):  # the forest carbon env
     def __init__(self, initial_state=np.array([150, 76, 0, 328, 328], dtype=np.float32), 
                 litterfall_rate=0.019, soil_decay=1/6.2, product_decay=1/100, tree_mature_rate=1/37, tree_density=656, tree_carbon_y_tonhayear=2.5, tree_carbon_o_tonhayear=0.2, 
                 reproduction_o=0.6, reproduction_y=0.2, tree_carbon_o_mgpertree = 0.076, tree_carbon_y_mgpertree = 0.038, tree_death_o = 0.05, tree_death_y=0.1, carrying_capacity=10000):
+        #Young growth rate (tree_carbon_y_tonhayear): [1.5, 3.3] t/ha/yr  (1)
+        #Old growth rate (tree_carbon_o_tonhayear): [0.2, 1.7] t/ha/yr (1)
+        #Young reproduction rate: [0.03, 1] (2)
+        #Old reproduction rate: [0.3, 10] (2)
+        #Young death rate: [0.03, 0.25] (3)
+        #Old death rate: [0.01, 0.05] (3)
+        #Young conversion: [0.003, 0.065] Mg C/tree
+        #Old conversion: [0.035, 0.2] Mg C/tree
+        #Litterfall rate K_T: [0.005, 0.025]
+        #Soil decay rate K_S: [0.02, 0.2] (4)
+        #Product decay rate K_P: [0.005, 12]
+        #Maturation rate: [0.2, 0.02]
+        
         self.initial_state = np.copy(initial_state)
         self.litterfall_rate = litterfall_rate # tree litterfall rate
         self.soil_decay = soil_decay # soil decay
