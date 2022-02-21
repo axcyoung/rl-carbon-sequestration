@@ -447,7 +447,7 @@ def compute_biodiversity(oldtree_ct, youngtree_ct, oldtree_ct2, youngtree_ct2):
     total_ct = oldtree_ct+youngtree_ct+oldtree_ct2+youngtree_ct2
     if total_ct==0: return -5 # penalty for harvesting all trees 
     porp1 = (oldtree_ct+youngtree_ct)/total_ct
-    porp2 = (oldtree_ct+youngtree_ct2)/total_ct
+    porp2 = (oldtree_ct2+youngtree_ct2)/total_ct
     bio = math.exp( -1*(porp1)*math.log(porp1) -1*(porp2)*math.log(porp2) )
     return bio
 
@@ -499,7 +499,7 @@ if __name__ == '__main__':
         "biodiversiy_weight": 0.5,
         "abundance_weight": 0.5
     }
-    outdirectory = "multi-bio+abundance"
+    outdirectory = "multi-bioabsabundance"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
     # eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
     dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
