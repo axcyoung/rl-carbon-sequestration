@@ -25,7 +25,7 @@ from baselines.common.schedules import LinearSchedule
 # logging.getLogger('tensorflow').disabled = True
 # tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR) # surpress warning
 # tf.get_logger().setLevel('ERROR')
-# TON2MG = 0.907185
+TON2MG = 0.907185
 
 class FCEnv(gym.Env):  # the forest carbon env
     metadata = {'render.modes': ['human']}
@@ -92,7 +92,7 @@ class FCEnv(gym.Env):  # the forest carbon env
         num_tree_cut = oldtree_ct*frac_tree_cut
         oldtree_ct = max(0, oldtree_ct - num_tree_cut)
         tree_carbon = max(0, tree_carbon-num_tree_cut*self.tree_carbon_o_mgpertree)
-        product_carbon += num_tree_cut*self.tree_carbon_o_mgpertree*3/4 # loses 25%
+        product_carbon += num_tree_cut*self.tree_carbon_o_mgpertree # loses 25%
         # 3. Calculate rewards
         carbon_sequestered = tree_carbon+soil_carbon+product_carbon - orig_total_carbon
         # econ_profit = 
@@ -406,20 +406,20 @@ def param_search():
 if __name__ == '__main__':
     parameters = {
         "initial_state": np.array([150, 76, 0, 328, 328], dtype=np.float32), # soil_carbon, tree_carbon, product_carbon, oldtree_ct, youngtree_ct
-        "litterfall_rate": 0.01, # tree litterfall rate, K_T
-        "soil_decay": 0.02, # soil decay, K_S
-        "product_decay": 1, # product decay, K_P
+        "litterfall_rate": 0.025, # tree litterfall rate, K_T
+        "soil_decay": 0.15, # soil decay, K_S
+        "product_decay": 0.005, # product decay, K_P
         "tree_mature_rate": 1/37, # maturation rate (young to old), m_1
         "tree_density" : 656, # tree density, d_t
-        "tree_carbon_y_tonhayear": 3, # carbon tons/ha/year for young trees, NPP_y
-        "tree_carbon_o_tonhayear": 1, # carbon tons/ha/year for old trees, NPP_o
-        "reproduction_o":0.6, # reproduction rate for old, r_o
-        "reproduction_y":0.2, # reproduction rate for young, reproduction_y
-        "tree_carbon_o_mgpertree": 0.076/8, # amount of carbon per old tree (Megagrams), C_o
-        "tree_carbon_y_mgpertree": 0.038/8, # amount of carbon per young tree (Megagrams), C_y
+        "tree_carbon_y_tonhayear": 4, # carbon tons/ha/year for young trees, NPP_y
+        "tree_carbon_o_tonhayear": 2, # carbon tons/ha/year for old trees, NPP_o
+        "reproduction_o":0.5, # reproduction rate for old, r_o
+        "reproduction_y":0.1, # reproduction rate for young, reproduction_y
+        "tree_carbon_o_mgpertree": 0.076, # amount of carbon per old tree (Megagrams), C_o
+        "tree_carbon_y_mgpertree": 0.038/10, # amount of carbon per young tree (Megagrams), C_y
         "tree_death_o": 0.05, # death rate of old tree, death_o
         "tree_death_y": 0.25, # death rate of young tree, death_y,
-        "carrying_capacity": 10000 # carraying capacity of the forest
+        "carrying_capacity": 3000 # carraying capacity of the forest
     }
     dqnparams = {
         "gamma": 0.99, # discount factor
@@ -427,7 +427,7 @@ if __name__ == '__main__':
         "exploration_end": 0.02,
         "exploration_timestep": 10000 # updated each step of each episode
     }
-    outdirectory = "baseline-lessH-moreproductdecay"
+    outdirectory = "new-baseline-carbon"
     if not os.path.exists(outdirectory): os.makedirs(outdirectory)
     eco_run(parameters, undisturbed_steps=10000, record=True) # 100 years
     dqn2(parameters, dqnparams, max_episode_num = 500, steps_per_episode=100, save_frequency=10)
